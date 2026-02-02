@@ -1,5 +1,9 @@
 use anchor_lang::prelude::*;
-use mpl_core::{instructions::RemovePluginV1CpiBuilder, types::PluginType, ID as CORE_PROGRAM_ID};
+use mpl_core::{
+    instructions::{RemovePluginV1CpiBuilder, UpdatePluginV1CpiBuilder},
+    types::{FreezeDelegate, Plugin, PluginType},
+    ID as CORE_PROGRAM_ID,
+};
 
 use crate::{
     errors::StakeError,
@@ -69,17 +73,21 @@ impl<'info> Unstake<'info> {
 
         // Verify freeze period has passed
         require!(
-            time_staked >= self.config.freeze_period as i64,
+            time_staked >= (self.config.freeze_period as i64) * 86400,
             StakeError::FreezePeriodNotPassed
         );
 
         // Calculate points earned (points_per_stake per second)
-        let points_earned = (time_staked as u32)
-            .checked_mul(self.config.points_per_stake as u32)
+        let points_earned = (time_staked / 86400)
+            .checked_mul(self.config.points_per_stake as i64)
             .unwrap();
 
         // Update user account
-        self.user_account.points = self.user_account.points.checked_add(points_earned).unwrap();
+        self.user_account.points = self
+            .user_account
+            .points
+            .checked_add(points_earned as u32)
+            .unwrap();
         self.user_account.amount_staked -= 1;
 
         // Remove freeze delegate plugin from the NFT
@@ -88,6 +96,16 @@ impl<'info> Unstake<'info> {
             &self.collection.key().to_bytes(),
             &[self.collection_info.bump],
         ]];
+
+        // Unfreeze the NFT
+        UpdatePluginV1CpiBuilder::new(&self.core_program.to_account_info())
+            .asset(&self.asset.to_account_info())
+            .collection(Some(&self.collection.to_account_info()))
+            .payer(&self.user.to_account_info())
+            .authority(Some(&self.collection_info.to_account_info()))
+            .system_program(&self.system_program.to_account_info())
+            .plugin(Plugin::FreezeDelegate(FreezeDelegate { frozen: false }))
+            .invoke_signed(signer_seeds)?;
 
         RemovePluginV1CpiBuilder::new(&self.core_program.to_account_info())
             .asset(&self.asset.to_account_info())

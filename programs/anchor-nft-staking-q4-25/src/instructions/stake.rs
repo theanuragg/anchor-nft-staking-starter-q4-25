@@ -91,7 +91,9 @@ impl<'info> Stake<'info> {
             .authority(Some(&self.collection_info.to_account_info()))
             .system_program(&self.system_program.to_account_info())
             .plugin(Plugin::FreezeDelegate(FreezeDelegate { frozen: true }))
-            .init_authority(PluginAuthority::UpdateAuthority)
+            .init_authority(PluginAuthority::Address {
+                address: self.collection_info.key(),
+            })
             .invoke_signed(signer_seeds)?;
 
         // Update user account
